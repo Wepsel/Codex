@@ -1,0 +1,25 @@
+version: "3.9"
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: config/Dockerfile.backend
+    environment:
+      PORT: 5010
+      NODE_ENV: development
+      MOCK_MODE: "true"
+      WEBSOCKET_PATH: /ws
+    ports:
+      - "5010:5010"
+  frontend:
+    build:
+      context: ..
+      dockerfile: config/Dockerfile.frontend
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://backend:5010/api
+      NEXT_PUBLIC_SOCKET_URL: http://backend:5010
+      NEXT_PUBLIC_SOCKET_PATH: /ws
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend

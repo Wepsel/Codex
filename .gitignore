@@ -1,0 +1,15 @@
+node_modules/
+dist/
+build/
+.coverage/
+.env
+.env.local
+.DS_Store
+.idea/
+.vscode/
+*.log
+pnpm-lock.yaml
+storybook-static/
+playwright-report/
+
+apps/frontend/.next/

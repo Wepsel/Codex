@@ -2,13 +2,20 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { UserProfile } from "@kube-suite/shared";
-import { fetchCurrentUser, login as loginRequest, logout as logoutRequest, register as registerRequest } from "@/lib/auth-client";
+import {
+  fetchCurrentUser,
+  login as loginRequest,
+  logout as logoutRequest,
+  register as registerRequest,
+  type LoginPayload,
+  type RegisterPayload
+} from "@/lib/auth-client";
 
 interface SessionState {
   user: UserProfile | null;
   loading: boolean;
-  login: (payload: { username: string; password: string }) => Promise<void>;
-  register: (payload: { username: string; email: string; name: string; password: string }) => Promise<void>;
+  login: (payload: LoginPayload) => Promise<void>;
+  register: (payload: RegisterPayload) => Promise<UserProfile>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
 }
@@ -23,7 +30,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     try {
       const me = await fetchCurrentUser();
       setUser(me);
-    } catch (error) {
+    } catch {
       setUser(null);
     } finally {
       setLoading(false);
@@ -35,7 +42,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   }, [refresh]);
 
   const login = useCallback(
-    async (payload: { username: string; password: string }) => {
+    async (payload: LoginPayload) => {
       setLoading(true);
       try {
         await loginRequest(payload);
@@ -47,18 +54,16 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     [refresh]
   );
 
-  const register = useCallback(
-    async (payload: { username: string; email: string; name: string; password: string }) => {
-      setLoading(true);
-      try {
-        await registerRequest(payload);
-        await refresh();
-      } finally {
-        setLoading(false);
-      }
-    },
-    [refresh]
-  );
+  const register = useCallback(async (payload: RegisterPayload) => {
+    setLoading(true);
+    try {
+      const profile = await registerRequest(payload);
+      setUser(profile);
+      return profile;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   const logout = useCallback(async () => {
     await logoutRequest();

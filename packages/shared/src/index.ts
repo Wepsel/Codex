@@ -1,4 +1,4 @@
-﻿export type ClusterPhase = "Healthy" | "Degraded" | "Critical";
+export type ClusterPhase = "Healthy" | "Degraded" | "Critical";
 
 export interface MetricPoint {
   timestamp: string;
@@ -87,15 +87,93 @@ export interface DeploymentWizardPayload {
   strategy: "RollingUpdate" | "Recreate";
 }
 
+export type CompanyRole = "admin" | "member";
+
+export type CompanyMembershipStatus = "active" | "pending" | "invited" | "rejected";
+
+export interface CompanyDescriptor {
+  id: string;
+  name: string;
+  slug: string;
+}
+
 export interface UserProfile {
   id: string;
   email: string;
   name: string;
   roles: string[];
+  company: {
+    id: string;
+    name: string;
+    slug: string;
+    role: CompanyRole;
+    status: CompanyMembershipStatus;
+    pendingRequestId?: string;
+    pendingInviteId?: string;
+  };
   preferences: {
     theme: "dark" | "light";
     notifications: boolean;
   };
+}
+
+export interface CompanyProfile extends CompanyDescriptor {
+  description?: string;
+  createdAt: string;
+  adminCount: number;
+  memberCount: number;
+  pendingRequests: number;
+  pendingInvites: number;
+}
+
+export interface CompanyMember {
+  id: string;
+  name: string;
+  email: string;
+  role: CompanyRole;
+  status: CompanyMembershipStatus;
+  createdAt: string;
+  lastSeenAt?: string;
+}
+
+export interface CompanyAdminOverview {
+  profile: CompanyProfile;
+  members: CompanyMember[];
+  invites: CompanyInvite[];
+  joinRequests: CompanyJoinRequest[];
+}
+
+
+
+export type CompanyInviteStatus = "pending" | "accepted" | "revoked" | "expired";
+
+export interface CompanyInvite {
+  id: string;
+  company: CompanyDescriptor;
+  email: string;
+  role: CompanyRole;
+  status: CompanyInviteStatus;
+  invitedBy: string;
+  createdAt: string;
+  expiresAt?: string;
+}
+
+export type CompanyJoinRequestStatus = "pending" | "approved" | "rejected";
+
+export interface CompanyJoinRequest {
+  id: string;
+  company: CompanyDescriptor;
+  userId: string;
+  userName: string;
+  status: CompanyJoinRequestStatus;
+  submittedAt: string;
+  decidedAt?: string;
+  decidedBy?: string;
+}
+
+export interface CompanyDirectoryEntry extends CompanyDescriptor {
+  memberCount: number;
+  inviteOnly: boolean;
 }
 
 export interface AuditLogEntry {
@@ -249,3 +327,25 @@ export interface IncidentWarRoomData {
     }>;
   };
 }
+
+export interface IncidentNoteInput {
+  author?: string;
+  content: string;
+}
+
+export interface ComplianceReport {
+  format: "json";
+  generatedAt: string;
+  preparedBy: string;
+  range: {
+    from: string;
+    to: string;
+  };
+  summary: ComplianceSummary;
+  incident: IncidentWarRoomData;
+}
+
+
+
+
+

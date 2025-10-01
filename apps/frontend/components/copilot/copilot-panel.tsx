@@ -34,7 +34,7 @@ const welcomeMessage: CopilotChatMessage = {
   id: "welcome",
   role: "assistant",
   content:
-    "Hey commander! Stel je vragen in mensentaal � ik vertaal ze naar kubectl en highlight risico''s voor je.",
+    "Hey commander! Stel je vragen in mensentaal en ik vertaal ze naar kubectl en highlight risico's voor je.",
   createdAt: new Date().toISOString()
 };
 

@@ -1,4 +1,5 @@
-﻿import type { Metadata } from "next";
+export const dynamic = "force-dynamic";
+import type { Metadata } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { Activity, Bell, CheckCircle2, Cpu, Lock, LogOut, MapPinned, ShieldCheck, Sparkles, UploadCloud } from "lucide-react";
@@ -245,3 +246,4 @@ function InfoField({ label, value, icon }: InfoFieldProps) {
     </div>
   );
 }
+

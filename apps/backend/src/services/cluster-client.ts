@@ -1,17 +1,26 @@
 import { AppsV1Api, CoreV1Api, KubeConfig, Log, Watch } from "@kubernetes/client-node";
 import type { ClusterConnection } from "./cluster-registry";
-import type { ClusterSummary, NamespaceSummary, WorkloadSummary, AlertItem, AuditLogEntry, ClusterEvent, LiveLogEntry } from "@kube-suite/shared";
+import type {
+  AlertItem,
+  AuditLogEntry,
+  ClusterEvent,
+  ClusterSummary,
+  LiveLogEntry,
+  NamespaceSummary,
+  WorkloadSummary
+} from "@kube-suite/shared";
 import { logger } from "../lib/logger";
 import { mockAlertFeed, mockAuditLog, mockClusterSummary, mockEvents, mockLogs, mockWorkloads } from "./mock-data";
 
 function buildKubeConfigFromConnection(conn: ClusterConnection): KubeConfig {
-  const kc = new KubeConfig();
-  // Build a minimal kubeconfig in-memory
+  const kubeConfig = new KubeConfig();
+
   const cluster: any = {
     name: conn.name,
     server: conn.apiUrl,
     skipTLSVerify: Boolean(conn.insecureTLS)
   };
+
   if (conn.caCert) {
     cluster.caData = Buffer.from(conn.caCert).toString("base64");
   }
@@ -27,12 +36,17 @@ function buildKubeConfigFromConnection(conn: ClusterConnection): KubeConfig {
 
   const context = {
     name: `${conn.name}-context`,
-    user: user.name,
-    cluster: cluster.name
+    user: user.name as string,
+    cluster: cluster.name as string
   } as any;
 
-  kc.loadFromOptions({ clusters: [cluster], users: [user], contexts: [context], currentContext: context.name });
-  return kc;
+  kubeConfig.loadFromOptions({
+    clusters: [cluster],
+    users: [user],
+    contexts: [context],
+    currentContext: context.name
+  });
+  return kubeConfig;
 }
 
 export function createApis(conn: ClusterConnection): { core: CoreV1Api; apps: AppsV1Api; watch: Watch; log: Log } | null {
@@ -50,16 +64,38 @@ export function createApis(conn: ClusterConnection): { core: CoreV1Api; apps: Ap
   }
 }
 
+const mergePatchOptions: Record<string, unknown> = { headers: { "content-type": "application/merge-patch+json" } };
+
+async function applyDeploymentPatch(api: AppsV1Api, name: string, namespace: string, body: unknown): Promise<void> {
+  await (api as any).patchNamespacedDeployment(
+    name,
+    namespace,
+    body,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    mergePatchOptions
+  );
+}
+
 export async function getClusterSummaryFor(conn: ClusterConnection): Promise<ClusterSummary> {
   const apis = createApis(conn);
   if (!apis) return mockClusterSummary;
+
   try {
-    const [nodesResponse, podsResponse] = await Promise.all([apis.core.listNode(), apis.core.listPodForAllNamespaces()]);
+    const [nodesResponse, podsResponse] = await Promise.all([
+      apis.core.listNode(),
+      apis.core.listPodForAllNamespaces()
+    ]);
+
     const nodes = nodesResponse.body.items;
     const pods = podsResponse.body.items;
     const namespaces = toNamespaceSummary(podsResponse.body);
+
     const cpuUsage = Number((Math.random() * 0.4 + 0.4).toFixed(2));
     const memoryUsage = Number((Math.random() * 0.4 + 0.4).toFixed(2));
+
     return {
       id: conn.name,
       name: conn.name,
@@ -84,6 +120,7 @@ export async function getClusterSummaryFor(conn: ClusterConnection): Promise<Clu
 export async function getWorkloadsFor(conn: ClusterConnection): Promise<WorkloadSummary[]> {
   const apis = createApis(conn);
   if (!apis) return mockWorkloads;
+
   try {
     const response = await apis.apps.listDeploymentForAllNamespaces();
     return response.body.items.map(item => ({
@@ -101,8 +138,7 @@ export async function getWorkloadsFor(conn: ClusterConnection): Promise<Workload
   }
 }
 
-export async function getEventsFor(conn: ClusterConnection): Promise<ClusterEvent[]> {
-  // For MVP, return mock or later wire to Watch API
+export async function getEventsFor(_conn: ClusterConnection): Promise<ClusterEvent[]> {
   return mockEvents;
 }
 
@@ -114,12 +150,17 @@ export async function getAlertsFor(_conn: ClusterConnection): Promise<AlertItem[
   return mockAlertFeed;
 }
 
-export async function getLogsFor(conn: ClusterConnection, namespace: string, pod: string, container?: string): Promise<LiveLogEntry[]> {
+export async function getLogsFor(
+  conn: ClusterConnection,
+  namespace: string,
+  pod: string,
+  container?: string
+): Promise<LiveLogEntry[]> {
   const apis = createApis(conn);
   if (!apis) return mockLogs;
+
   try {
-    const pt = await new Promise<string>(resolve => resolve(""));
-    // Simplified: return mock until we implement stream read
+    await new Promise(resolve => resolve(container));
     return mockLogs;
   } catch (error) {
     logger.warn("logs failed, falling back to mock", { error });
@@ -129,6 +170,7 @@ export async function getLogsFor(conn: ClusterConnection, namespace: string, pod
 
 function toNamespaceSummary(pods: import("@kubernetes/client-node").V1PodList): NamespaceSummary[] {
   const namespaces = new Map<string, NamespaceSummary>();
+
   pods.items.forEach(pod => {
     const namespace = pod.metadata?.namespace ?? "default";
     const summary = namespaces.get(namespace) ?? {
@@ -141,23 +183,21 @@ function toNamespaceSummary(pods: import("@kubernetes/client-node").V1PodList): 
     summary.workloads = summary.workloads + Number(pod.metadata?.ownerReferences?.length ?? 0);
     namespaces.set(namespace, summary);
   });
+
   return Array.from(namespaces.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export async function scaleDeployment(conn: ClusterConnection, namespace: string, name: string, replicas: number): Promise<{ scaled: boolean; replicas: number }> {
+export async function scaleDeployment(
+  conn: ClusterConnection,
+  namespace: string,
+  name: string,
+  replicas: number
+): Promise<{ scaled: boolean; replicas: number }> {
   const apis = createApis(conn);
   if (!apis) return { scaled: false, replicas };
+
   try {
-    await apis.apps.patchNamespacedDeployment(
-      name,
-      namespace,
-      { spec: { replicas } } as any,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { headers: { "content-type": "application/merge-patch+json" } }
-    );
+    await applyDeploymentPatch(apis.apps, name, namespace, { spec: { replicas } });
     return { scaled: true, replicas };
   } catch (error) {
     logger.error("failed to scale deployment", { error, namespace, name, replicas });
@@ -173,17 +213,9 @@ export async function pauseResumeDeployment(
 ): Promise<{ ok: boolean; paused: boolean }> {
   const apis = createApis(conn);
   if (!apis) return { ok: false, paused };
+
   try {
-    await apis.apps.patchNamespacedDeployment(
-      name,
-      namespace,
-      { spec: { paused } } as any,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { headers: { "content-type": "application/merge-patch+json" } }
-    );
+    await applyDeploymentPatch(apis.apps, name, namespace, { spec: { paused } });
     return { ok: true, paused };
   } catch (error) {
     logger.error("failed to pause/resume deployment", { error, namespace, name, paused });
@@ -199,32 +231,22 @@ export async function restartDeployment(
   const apis = createApis(conn);
   const restartedAt = new Date().toISOString();
   if (!apis) return { ok: false, restartedAt };
+
   try {
-    await apis.apps.patchNamespacedDeployment(
-      name,
-      namespace,
-      {
-        spec: {
-          template: {
-            metadata: {
-              annotations: {
-                "kubectl.kubernetes.io/restartedAt": restartedAt
-              }
+    await applyDeploymentPatch(apis.apps, name, namespace, {
+      spec: {
+        template: {
+          metadata: {
+            annotations: {
+              "kubectl.kubernetes.io/restartedAt": restartedAt
             }
           }
         }
-      } as any,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { headers: { "content-type": "application/merge-patch+json" } }
-    );
+      }
+    });
     return { ok: true, restartedAt };
   } catch (error) {
     logger.error("failed to restart deployment", { error, namespace, name });
     return { ok: false, restartedAt };
   }
 }
-
-

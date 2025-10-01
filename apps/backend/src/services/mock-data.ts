@@ -6,6 +6,7 @@ import type {
   ClusterSummary,
   LiveLogEntry,
   NamespaceSummary,
+  NodeStatus,
   WorkloadSummary
 } from "@kube-suite/shared";
 
@@ -111,6 +112,39 @@ const events: ClusterEvent[] = [
   }
 ];
 
+const nodes: NodeStatus[] = [
+  {
+    name: "ip-10-0-2-17",
+    roles: ["control-plane"],
+    cpu: 0.38,
+    memory: 0.44,
+    pods: 47,
+    age: "18d",
+    status: "Ready",
+    kubeletVersion: "v1.29.3"
+  },
+  {
+    name: "ip-10-0-3-24",
+    roles: ["worker"],
+    cpu: 0.54,
+    memory: 0.62,
+    pods: 61,
+    age: "11d",
+    status: "Ready",
+    kubeletVersion: "v1.29.3"
+  },
+  {
+    name: "ip-10-0-4-31",
+    roles: ["worker"],
+    cpu: 0.71,
+    memory: 0.58,
+    pods: 69,
+    age: "7d",
+    status: "Ready",
+    kubeletVersion: "v1.29.3"
+  }
+];
+
 export const mockClusterSummary: ClusterSummary = {
   id: "demo-cluster",
   name: "Aurora Production",
@@ -132,3 +166,10 @@ export const mockAlertFeed = alerts;
 export const mockAuditLog = auditLogs;
 export const mockLogs = logs;
 export const mockEvents = events;
+export const mockNodeStatuses = nodes;
+
+
+
+
+
+

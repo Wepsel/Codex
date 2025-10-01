@@ -1,6 +1,5 @@
-import type { Server } from "socket.io";
 import { broadcastEvent, getSocketRef } from "../lib/socket";
-import type { SocketChannels } from "../lib/socket";
+import type { SocketServer } from "../lib/socket";
 import { mockAuditLog, mockEvents, mockLogs } from "./mock-data";
 import type { DeploymentProgressEvent, DeploymentStage } from "@kube-suite/shared";
 
@@ -8,7 +7,7 @@ let intervalId: NodeJS.Timeout | null = null;
 
 const progressStages: DeploymentStage[] = ["plan", "build", "ship", "rollout", "complete"];
 
-export function startStreaming(io: Server<SocketChannels>) {
+export function startStreaming(io: SocketServer) {
   if (intervalId) {
     return;
   }

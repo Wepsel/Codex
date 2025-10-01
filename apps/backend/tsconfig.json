@@ -1,16 +1,27 @@
-{
-  "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    "outDir": "dist",
-    "rootDir": "src",
-    "types": ["node"],
-    "module": "CommonJS",
-    "moduleResolution": "Node",
-    "baseUrl": ".",
-    "paths": {
-      "@kube-suite/shared": ["../../packages/shared/dist/index.d.ts"]
-    }
-  },
-  "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "dist", "tests"]
+﻿{
+    "extends":  "../../tsconfig.base.json",
+    "compilerOptions":  {
+                            "outDir":  "dist",
+                            "rootDir":  "src",
+                            "types":  [
+                                          "node",
+                                          "jest"
+                                      ],
+                            "module":  "CommonJS",
+                            "moduleResolution":  "Node",
+                            "baseUrl":  ".",
+                            "paths":  {
+                                          "@kube-suite/shared":  [
+                                                                     "../../packages/shared/dist/index.d.ts"
+                                                                 ]
+                                      }
+                        },
+    "include":  [
+                    "src/**/*.ts"
+                ],
+    "exclude":  [
+                    "node_modules",
+                    "dist",
+                    "tests"
+                ]
 }

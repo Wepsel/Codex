@@ -6,8 +6,7 @@ export function createQueryClient() {
       queries: {
         refetchInterval: 30_000,
         refetchOnWindowFocus: true,
-        staleTime: 20_000,
-        suspense: true
+        staleTime: 20_000
       }
     }
   });

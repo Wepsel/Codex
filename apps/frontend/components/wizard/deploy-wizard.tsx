@@ -211,7 +211,8 @@ export function DeployWizard({ open, onClose }: DeployWizardProps) {
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-8 py-6">\n              <div className="grid grid-cols-5 gap-6">
+            <div className="flex-1 overflow-y-auto px-8 py-6">
+              <div className="grid grid-cols-5 gap-6">
               <section className="col-span-3 flex flex-col space-y-6 overflow-hidden">
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <label className="space-y-2">
@@ -239,7 +240,7 @@ export function DeployWizard({ open, onClose }: DeployWizardProps) {
                     />
                   </label>
                   <label className="space-y-2">
-                    <span className="text-xs uppercase tracking-[0.35em] text-white/50">Replica''s</span>
+                    <span className="text-xs uppercase tracking-[0.35em] text-white/50">Replica&apos;s</span>
                     <input
                       type="number"
                       min={1}

@@ -50,7 +50,7 @@ function buildAssistantMessage(prompt: string, suggestions: CopilotCommandSugges
   return {
     id: randomUUID(),
     role: "assistant" as const,
-    content: `${summary}\nLaat me weten als je er één wilt uitvoeren of aanpassen.`,
+    content: `${summary}\nLaat me weten als je er een wilt uitvoeren of aanpassen.`,
     createdAt: new Date().toISOString()
   };
 }

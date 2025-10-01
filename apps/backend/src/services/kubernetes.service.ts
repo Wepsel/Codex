@@ -1,6 +1,6 @@
 import { PassThrough } from "stream";
 import { randomUUID } from "crypto";
-import type { V1PodList } from "@kubernetes/client-node";
+import type { V1Node, V1PodList } from "@kubernetes/client-node";
 import { AppsV1Api, CoreV1Api, KubeConfig, Log, Watch } from "@kubernetes/client-node";
 import type {
   AlertItem,
@@ -11,6 +11,7 @@ import type {
   DeploymentWizardPayload,
   LiveLogEntry,
   NamespaceSummary,
+  NodeStatus,
   WorkloadSummary
 } from "@kube-suite/shared";
 import env from "../config/env";
@@ -21,6 +22,7 @@ import {
   mockClusterSummary,
   mockEvents,
   mockLogs,
+  mockNodeStatuses,
   mockWorkloads
 } from "./mock-data";
 import { simulateDeploymentProgress } from "./streaming.service";
@@ -137,6 +139,22 @@ export class KubernetesService {
     }
   }
 
+
+  async getNodeStatuses(): Promise<NodeStatus[]> {
+    if (!this.coreApi) {
+      return mockNodeStatuses;
+    }
+
+    try {
+      const response = await this.coreApi.listNode();
+      return response.body.items
+        .map(node => this.toNodeStatus(node))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    } catch (error) {
+      logger.warn("failed to list nodes, using mock", { error });
+      return mockNodeStatuses;
+    }
+  }
   async getAlerts(): Promise<AlertItem[]> {
     return mockAlertFeed;
   }
@@ -169,7 +187,7 @@ export class KubernetesService {
     const entries = data
       .split("\n")
       .filter(Boolean)
-      .map(line => ({
+      .map((line: string) => ({
         pod,
         namespace,
         container: container ?? "",
@@ -235,6 +253,38 @@ export class KubernetesService {
     };
   }
 
+  private toNodeStatus(node: V1Node): NodeStatus {
+    const metadata = node.metadata ?? {};
+    const status = node.status ?? {};
+    const allocatable = status.allocatable ?? {};
+    const capacity = status.capacity ?? {};
+    const roles = extractNodeRoles(metadata.labels ?? {});
+    const readyCondition = (status.conditions ?? []).find(condition => condition.type === "Ready");
+    const parsedAllocatableCpu = parseCpuValue(allocatable.cpu);
+    const parsedCapacityCpu = parseCpuValue(capacity.cpu);
+    const parsedAllocatableMemory = parseMemoryValue(allocatable.memory);
+    const parsedCapacityMemory = parseMemoryValue(capacity.memory);
+
+    const podCapacity = Number(capacity.pods ?? 0);
+    const allocatablePods = Number(allocatable.pods ?? 0);
+    const usedPods = Math.max(0, podCapacity - allocatablePods);
+
+    return {
+      name: metadata.name ?? "unknown",
+      roles: roles.length > 0 ? roles : ["worker"],
+      cpu: computeUsageRatio(parsedAllocatableCpu, parsedCapacityCpu),
+      memory: computeUsageRatio(parsedAllocatableMemory, parsedCapacityMemory),
+      pods: usedPods,
+      age: formatNodeAge(metadata.creationTimestamp),
+      status:
+        readyCondition?.status === "True"
+          ? "Ready"
+          : readyCondition?.status === "False"
+            ? "NotReady"
+            : "Unknown",
+      kubeletVersion: status.nodeInfo?.kubeletVersion ?? "unknown"
+    };
+  }
   private toNamespaceSummary(pods: V1PodList): NamespaceSummary[] {
     const namespaces = new Map<string, NamespaceSummary>();
     pods.items.forEach(pod => {
@@ -255,4 +305,108 @@ export class KubernetesService {
 }
 
 const kubernetesService = new KubernetesService();
+
 export default kubernetesService;
+
+function extractNodeRoles(labels: Record<string, string>): string[] {
+  const roles = Object.keys(labels)
+    .filter(key => key.startsWith("node-role.kubernetes.io/") || key === "kubernetes.io/role")
+    .map(key => {
+      if (key === "kubernetes.io/role") {
+        return labels[key];
+      }
+      const parts = key.split("/");
+      const role = parts[parts.length - 1];
+      return role.length > 0 ? role : "worker";
+    })
+    .filter((role): role is string => Boolean(role && role.trim().length > 0));
+
+  return Array.from(new Set(roles));
+}
+
+function parseCpuValue(value?: string): number {
+  if (!value) {
+    return 0;
+  }
+  if (value.endsWith("m")) {
+    const milli = Number(value.slice(0, -1));
+    return Number.isFinite(milli) ? milli / 1000 : 0;
+  }
+  const cpu = Number(value);
+  return Number.isFinite(cpu) ? cpu : 0;
+}
+
+function parseMemoryValue(value?: string): number {
+  if (!value) {
+    return 0;
+  }
+  const match = value.match(/^(\d+)(Ei|Pi|Ti|Gi|Mi|Ki)?$/);
+  if (!match) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : 0;
+  }
+
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount)) {
+    return 0;
+  }
+
+  const unit = match[2];
+  const multipliers: Record<string, number> = {
+    Ki: 1024,
+    Mi: 1024 ** 2,
+    Gi: 1024 ** 3,
+    Ti: 1024 ** 4,
+    Pi: 1024 ** 5,
+    Ei: 1024 ** 6
+  };
+
+  if (!unit) {
+    return amount;
+  }
+
+  return amount * (multipliers[unit] ?? 1);
+}
+
+function computeUsageRatio(allocatable: number, capacity: number): number {
+  if (capacity <= 0) {
+    return 0;
+  }
+  const used = Math.max(0, capacity - allocatable);
+  const ratio = used / capacity;
+  return Number(Math.min(1, Math.max(0, ratio)).toFixed(2));
+}
+
+function formatNodeAge(timestamp?: string | Date): string {
+  if (!timestamp) {
+    return "-";
+  }
+  const created = new Date(timestamp).getTime();
+  if (Number.isNaN(created)) {
+    return "-";
+  }
+
+  const diffMs = Date.now() - created;
+  const days = Math.floor(diffMs / 86_400_000);
+  if (days > 0) {
+    return `${days}d`;
+  }
+  const hours = Math.floor(diffMs / 3_600_000);
+  if (hours > 0) {
+    return `${hours}h`;
+  }
+  const minutes = Math.max(1, Math.floor(diffMs / 60_000));
+  return `${minutes}m`;
+}
+
+
+
+
+
+
+
+
+
+
+
+

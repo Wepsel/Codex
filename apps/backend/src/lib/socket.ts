@@ -11,17 +11,29 @@ import type {
   LiveLogEntry
 } from "@kube-suite/shared";
 
-export interface SocketChannels {
-  audit: EventEnvelope<AuditLogEntry | ClusterEvent>;
-  logs: EventEnvelope<LiveLogEntry>;
-  workflow: EventEnvelope<DeploymentProgressEvent>;
-}
+type ClientToServerEvents = {
+  register: (payload: LiveStreamClientInfo) => void;
+};
+
+type ServerToClientEvents = {
+  audit: (event: EventEnvelope<AuditLogEntry | ClusterEvent>) => void;
+  logs: (event: EventEnvelope<LiveLogEntry>) => void;
+  workflow: (event: EventEnvelope<DeploymentProgressEvent>) => void;
+};
+
+type InterServerEvents = Record<string, never>;
+type SocketData = Record<string, never>;
+
+type KubeSuiteSocketServer = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
+
+export type SocketChannels = ServerToClientEvents;
+export type SocketServer = KubeSuiteSocketServer;
 
 const activeClients = new Map<string, LiveStreamClientInfo>();
-let socketRef: Server<SocketChannels> | null = null;
+let socketRef: KubeSuiteSocketServer | null = null;
 
-export function createSocketServer(httpServer: HttpServer): Server<SocketChannels> {
-  const io = new Server(httpServer, {
+export function createSocketServer(httpServer: HttpServer): KubeSuiteSocketServer {
+  const io = new Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>(httpServer, {
     path: env.websocketPath,
     cors: {
       origin: "*"
@@ -42,18 +54,18 @@ export function createSocketServer(httpServer: HttpServer): Server<SocketChannel
     });
   });
 
-  socketRef = io as Server<SocketChannels>;
-  return io as Server<SocketChannels>;
+  socketRef = io;
+  return io;
 }
 
-export function broadcastEvent<TChannel extends keyof SocketChannels>(
-  io: Server<SocketChannels>,
+export function broadcastEvent<TChannel extends keyof ServerToClientEvents>(
+  io: KubeSuiteSocketServer,
   channel: TChannel,
-  event: SocketChannels[TChannel]
+  ...args: Parameters<ServerToClientEvents[TChannel]>
 ): void {
-  io.emit(channel, event);
+  io.emit(channel, ...args);
 }
 
-export function getSocketRef(): Server<SocketChannels> | null {
+export function getSocketRef(): KubeSuiteSocketServer | null {
   return socketRef;
 }

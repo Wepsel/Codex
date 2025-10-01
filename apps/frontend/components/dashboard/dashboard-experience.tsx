@@ -39,7 +39,7 @@ export function DashboardExperience({ summary, workloads, alerts }: DashboardExp
           <p className="text-xs uppercase tracking-[0.45em] text-white/40">Aurora Production Command</p>
           <h1 className="mt-3 text-3xl font-semibold text-white">Mission dashboard</h1>
           <p className="mt-2 text-sm text-white/50">
-            Houd je deployments, telemetrie en rollouts in de gaten vanuit ��n cinematic cockpit.
+            Houd je deployments, telemetrie en rollouts in de gaten vanuit een cinematic cockpit.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">

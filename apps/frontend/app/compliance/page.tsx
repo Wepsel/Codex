@@ -1,6 +1,8 @@
-﻿import type { ComplianceSummary } from "@kube-suite/shared";
+﻿export const dynamic = "force-dynamic";
+import type { ComplianceSummary } from "@kube-suite/shared";
 import { ComplianceStudio } from "@/components/compliance/compliance-studio";
-import { apiFetch } from "@/lib/api-client";
+import { apiFetch, isCompanyMembershipInactiveError } from "@/lib/api-client";
+import { PendingMembershipNotice } from "@/components/pending-membership";
 
 export const metadata = {
   title: "Nebula Ops | Compliance Studio",
@@ -8,6 +10,13 @@ export const metadata = {
 };
 
 export default async function CompliancePage() {
-  const summary = await apiFetch<ComplianceSummary>("/compliance/summary");
-  return <ComplianceStudio summary={summary} />;
+  try {
+    const summary = await apiFetch<ComplianceSummary>("/compliance/summary");
+    return <ComplianceStudio summary={summary} />;
+  } catch (error) {
+    if (isCompanyMembershipInactiveError(error)) {
+      return <PendingMembershipNotice />;
+    }
+    throw error;
+  }
 }

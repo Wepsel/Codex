@@ -14,16 +14,27 @@ export default function LogsPage() {
   const allLogs = useMemo(() => feed.logs, [feed.logs]);
 
   const filtered = useMemo(() => {
-    return allLogs.filter(l => (level === "all" || l.level === level) && `${l.pod} ${l.container} ${l.message}`.toLowerCase().includes(query.toLowerCase()));
+    return allLogs.filter(
+      log =>
+        (level === "all" || log.level === level) &&
+        `${log.pod} ${log.container} ${log.message}`.toLowerCase().includes(query.toLowerCase())
+    );
   }, [allLogs, query, level]);
 
   async function analyze() {
-    const lines = filtered.slice(0, 50).map(l => `${l.level.toUpperCase()} ${l.pod}/${l.container}: ${l.message}`);
+    const lines = filtered
+      .slice(0, 50)
+      .map(log => `${log.level.toUpperCase()} ${log.pod}/${log.container}: ${log.message}`);
+
     try {
-      const resp = await apiFetch<{ answer: string }>("/ai/analyze", { method: "POST", body: JSON.stringify({ lines }) });
-      setAnalysis(resp.answer);
-    } catch (e: any) {
-      setAnalysis("AI analyze failed: " + (e?.message ?? e));
+      const response = await apiFetch<{ answer: string }>("/ai/analyze", {
+        method: "POST",
+        body: JSON.stringify({ lines })
+      });
+      setAnalysis(response.answer);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setAnalysis(`AI analyze failed: ${message}`);
     }
   }
 
@@ -39,14 +50,18 @@ export default function LogsPage() {
             <Search className="h-4 w-4 text-white/50" />
             <input
               value={query}
-              onChange={e => setQuery(e.target.value)}
+              onChange={event => setQuery(event.target.value)}
               placeholder="Zoek pods/containers/tekst"
               className="bg-transparent text-sm text-white/80 focus:outline-none"
             />
           </div>
           <div className="flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-2">
             <Filter className="h-4 w-4 text-white/50" />
-            <select value={level} onChange={e => setLevel(e.target.value)} className="bg-transparent text-sm text-white/80 focus:outline-none">
+            <select
+              value={level}
+              onChange={event => setLevel(event.target.value)}
+              className="bg-transparent text-sm text-white/80 focus:outline-none"
+            >
               <option value="all">Alle</option>
               <option value="error">error</option>
               <option value="warn">warn</option>
@@ -54,7 +69,10 @@ export default function LogsPage() {
               <option value="debug">debug</option>
             </select>
           </div>
-          <button onClick={analyze} className="flex items-center gap-2 rounded-md bg-accent px-3 py-2 text-sm font-semibold text-black">
+          <button
+            onClick={analyze}
+            className="flex items-center gap-2 rounded-md bg-accent px-3 py-2 text-sm font-semibold text-black"
+          >
             <Wand2 className="h-4 w-4" /> Analyze
           </button>
         </div>
@@ -79,22 +97,32 @@ export default function LogsPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-white/5">
-            {filtered.slice(0, 200).map((l, i) => (
-              <tr key={`${l.pod}-${l.timestamp}-${i}`} className="hover:bg-white/5">
-                <td className="px-4 py-2 text-white/50">{new Date(l.timestamp).toLocaleTimeString()}</td>
+            {filtered.slice(0, 200).map((log, index) => (
+              <tr key={`${log.pod}-${log.timestamp}-${index}`} className="hover:bg-white/5">
+                <td className="px-4 py-2 text-white/50">{new Date(log.timestamp).toLocaleTimeString()}</td>
                 <td className="px-4 py-2">
-                  <span className={`rounded-full px-2 py-1 text-[10px] uppercase tracking-widest ${
-                    l.level === "error" ? "bg-danger/20 text-danger" : l.level === "warn" ? "bg-yellow-500/20 text-yellow-400" : "bg-white/10 text-white/70"
-                  }`}>{l.level}</span>
+                  <span
+                    className={`rounded-full px-2 py-1 text-[10px] uppercase tracking-widest ${
+                      log.level === "error"
+                        ? "bg-danger/20 text-danger"
+                        : log.level === "warn"
+                          ? "bg-yellow-500/20 text-yellow-400"
+                          : "bg-white/10 text-white/70"
+                    }`}
+                  >
+                    {log.level}
+                  </span>
                 </td>
-                <td className="px-4 py-2 text-white/70">{l.pod}</td>
-                <td className="px-4 py-2 text-white/50">{l.container}</td>
-                <td className="px-4 py-2 text-white/80">{l.message}</td>
+                <td className="px-4 py-2 text-white/70">{log.pod}</td>
+                <td className="px-4 py-2 text-white/50">{log.container}</td>
+                <td className="px-4 py-2 text-white/80">{log.message}</td>
               </tr>
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td className="px-4 py-6 text-center text-xs text-white/40" colSpan={5}>Geen logs gevonden</td>
+                <td className="px-4 py-6 text-center text-xs text-white/40" colSpan={5}>
+                  Geen logs gevonden
+                </td>
               </tr>
             )}
           </tbody>
@@ -103,5 +131,3 @@ export default function LogsPage() {
     </div>
   );
 }
-
-

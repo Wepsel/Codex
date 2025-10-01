@@ -19,6 +19,10 @@ export async function listWorkloads(req: RequestWithUser, res: Response) {
   res.json({ ok: true, data: workloads });
 }
 
+export async function fetchNodes(req: RequestWithUser, res: Response) {
+  const nodes = await kubernetesService.getNodeStatuses();
+  res.json({ ok: true, data: nodes });
+}
 export async function fetchAlerts(req: RequestWithUser, res: Response) {
   const alerts = await kubernetesService.getAlerts();
   res.json({ ok: true, data: alerts });
@@ -63,3 +67,5 @@ export async function copilotInterpret(req: RequestWithUser, res: Response) {
   const response = interpretCopilotPrompt(prompt);
   res.json({ ok: true, data: response });
 }
+
+

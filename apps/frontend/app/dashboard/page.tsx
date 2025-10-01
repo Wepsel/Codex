@@ -1,6 +1,9 @@
-import type { AlertItem, ClusterSummary, WorkloadSummary } from "@kube-suite/shared";
+﻿import type { AlertItem, ClusterSummary, WorkloadSummary } from "@kube-suite/shared";
 import { DashboardExperience } from "@/components/dashboard/dashboard-experience";
-import { apiFetch } from "@/lib/api-client";
+import { apiFetch, isCompanyMembershipInactiveError } from "@/lib/api-client";
+import { PendingMembershipNotice } from "@/components/pending-membership";
+
+export const dynamic = "force-dynamic";
 
 async function getDashboardData() {
   const [summary, workloads, alerts] = await Promise.all([
@@ -13,7 +16,13 @@ async function getDashboardData() {
 }
 
 export default async function DashboardPage() {
-  const { summary, workloads, alerts } = await getDashboardData();
-
-  return <DashboardExperience summary={summary} workloads={workloads} alerts={alerts} />;
+  try {
+    const { summary, workloads, alerts } = await getDashboardData();
+    return <DashboardExperience summary={summary} workloads={workloads} alerts={alerts} />;
+  } catch (error) {
+    if (isCompanyMembershipInactiveError(error)) {
+      return <PendingMembershipNotice />;
+    }
+    throw error;
+  }
 }

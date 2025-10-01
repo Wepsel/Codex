@@ -2,6 +2,14 @@ import { render, screen } from "@testing-library/react";
 import { vi } from "vitest";
 import type { AlertItem, ClusterSummary, WorkloadSummary } from "@kube-suite/shared";
 
+vi.mock("@/components/session-context", () => ({
+  useSession: () => ({
+    user: {
+      company: { role: "admin", status: "active" }
+    }
+  })
+}));
+
 vi.mock("@/components/copilot/copilot-panel", () => ({
   CopilotPanel: () => null
 }));

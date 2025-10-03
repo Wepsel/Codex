@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { query } from "../lib/db";
 import {
   copilotInterpret,
   deployManifest,

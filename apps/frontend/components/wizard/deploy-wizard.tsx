@@ -171,6 +171,19 @@ export function DeployWizard({ open, onClose }: DeployWizardProps) {
   }
 
   function updateForm<T extends keyof WizardState>(key: T, value: WizardState[T]) {
+    // When container image changes, keep manifest YAML in sync by updating all image: lines
+    if (key === "image") {
+      const nextImage = value as unknown as string;
+      setForm(prev => {
+        const imageLineRegex = /(^|\n)(\s*)image:\s*[^\s#]+(\s*(?:#.*)?)/g;
+        const updatedManifest = prev.manifest.replace(imageLineRegex, (_match, prefix, indent, suffix) => {
+          const safeSuffix = typeof suffix === "string" ? suffix : "";
+          return `${prefix}${indent}image: ${nextImage}${safeSuffix}`;
+        });
+        return { ...prev, image: nextImage, manifest: updatedManifest };
+      });
+      return;
+    }
     setForm(prev => ({ ...prev, [key]: value }));
   }
 

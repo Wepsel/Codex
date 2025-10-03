@@ -4,25 +4,40 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { UserProfile } from "@kube-suite/shared";
 import { cn } from "@/lib/utils";
-import {
-  Activity,
-  Cloud,
-  Gauge,
-  Layers,
-  LayoutDashboard,
-  Settings
-} from "lucide-react";
+import { useEffect, useState } from "react";
+import { Activity, Cloud, Cpu, Gauge, Layers, LayoutDashboard, LineChart, Settings, ShieldPlus, ShieldCheck } from "lucide-react";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/workloads", label: "Workloads", icon: Layers },
   { href: "/events", label: "Events", icon: Activity },
   { href: "/logs", label: "Logs", icon: Activity },
+  { href: "/ai-insights", label: "AI Insights", icon: Gauge },
+  { href: "/self-healing", label: "Self-Healing", icon: ShieldPlus },
+  { href: "/capacity", label: "Capacity", icon: Cpu },
+  { href: "/optimizer", label: "Optimizer", icon: LineChart },
+  { href: "/zero-trust", label: "Zero Trust", icon: ShieldCheck },
   { href: "/settings", label: "Settings", icon: Settings }
 ];
 
 export function Sidebar({ user }: { user: UserProfile }) {
   const pathname = usePathname();
+  const [activeClusterName, setActiveClusterName] = useState<string | null>(null);
+
+  useEffect(() => {
+    const id = typeof window !== "undefined" ? window.localStorage.getItem("clusterId") : null;
+    const name = id ? (window.localStorage.getItem(`cluster:${id}:name`) || null) : null;
+    setActiveClusterName(name);
+    const onStorage = () => {
+      const nextId = window.localStorage.getItem("clusterId");
+      const nextName = nextId ? (window.localStorage.getItem(`cluster:${nextId}:name`) || null) : null;
+      setActiveClusterName(nextName);
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener("storage", onStorage);
+      return () => window.removeEventListener("storage", onStorage);
+    }
+  }, []);
 
   return (
     <aside className="relative hidden w-72 shrink-0 border-r border-white/5 bg-[#08091c] px-6 py-8 md:flex">
@@ -66,6 +81,17 @@ export function Sidebar({ user }: { user: UserProfile }) {
         </div>
 
         <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-white/70 backdrop-blur">
+          {activeClusterName ? (
+            <div className="mb-3 rounded-xl border border-white/10 bg-white/5 p-3">
+              <p className="text-[10px] uppercase tracking-[0.35em] text-white/40">Actief cluster</p>
+              <p className="mt-1 text-sm font-semibold text-accent">{activeClusterName}</p>
+            </div>
+          ) : (
+            <div className="mb-3 rounded-xl border border-warning/40 bg-warning/10 p-3">
+              <p className="text-[10px] uppercase tracking-[0.35em] text-white/60">Geen cluster geselecteerd</p>
+              <p className="mt-1 text-xs text-white/70">Kies er Ã©Ã©n in de balk boven.</p>
+            </div>
+          )}
           <p className="text-xs uppercase tracking-[0.35em] text-white/40">Signed in as</p>
           <p className="mt-1 text-sm font-semibold text-white">{user.name}</p>
           <p className="text-xs text-white/50">{user.email}</p>
@@ -78,4 +104,6 @@ export function Sidebar({ user }: { user: UserProfile }) {
     </aside>
   );
 }
+
+
 

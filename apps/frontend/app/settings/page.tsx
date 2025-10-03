@@ -338,6 +338,8 @@ export default function SettingsPage() {
   const [token, setToken] = useState("");
   const [caCert, setCaCert] = useState("");
   const [insecure, setInsecure] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
 
   const [compliance, setCompliance] = useState<ComplianceSummary | null>(null);
   const [complianceLoading, setComplianceLoading] = useState(true);
@@ -351,73 +353,176 @@ export default function SettingsPage() {
 
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
+  const [savedStatuses, setSavedStatuses] = useState<Record<string, { status: "ok" | "failed"; message?: string }>>({});
+  const [probingIds, setProbingIds] = useState<Set<string>>(new Set());
+  const [activeId, setActiveId] = useState<string | undefined>(
+    typeof window !== "undefined" ? window.localStorage.getItem("clusterId") ?? undefined : undefined
+  );
 
   useEffect(() => {
-    apiFetch<{ id: string; name: string }[]>("/clusters").then(setList).catch(() => {});
+    apiFetch<{ id: string; name: string }[]>("/clusters")
+      .then(items => {
+        setList(items);
+        if (!activeId && items.length > 0) {
+          const firstId = items[0].id;
+          setActiveId(firstId);
+          if (typeof window !== "undefined") {
+            window.localStorage.setItem("clusterId", firstId);
+            document.cookie = `clusterId=${firstId}; path=/`;
+          }
+        }
+        // After loading, probe all saved clusters
+        if (items.length > 0) {
+          Promise.all(
+            items.map(async c => {
+              try {
+                setProbingIds(prev => new Set(prev).add(c.id));
+                await apiFetch(`/clusters/${c.id}/probe`, { method: "POST" });
+                setSavedStatuses(prev => ({ ...prev, [c.id]: { status: "ok" } }));
+              } catch (err) {
+                const apiErr = err as any;
+                let message = apiErr?.message ?? "onbekende fout";
+                if (apiErr?.body && typeof apiErr.body === "object") {
+                  const body = apiErr.body as any;
+                  message = body.error || message;
+                }
+                setSavedStatuses(prev => ({ ...prev, [c.id]: { status: "failed", message } }));
+              } finally {
+                setProbingIds(prev => {
+                  const next = new Set(prev);
+                  next.delete(c.id);
+                  return next;
+                });
+              }
+            })
+          ).catch(() => {});
+        }
+      })
+      .catch(() => {});
   }, []);
 
-  const loadCompliance = useCallback(async () => {
+  const probeSaved = useCallback(async (id: string) => {
     try {
-      const data = await apiFetch<ComplianceSummary>("/compliance/summary");
-      setCompliance(data);
-      setComplianceError(null);
-    } catch (error) {
-      setComplianceError(error instanceof Error ? error.message : "Kon compliance data niet laden");
+      setProbingIds(prev => new Set(prev).add(id));
+      await apiFetch(`/clusters/${id}/probe`, { method: "POST" });
+      setSavedStatuses(prev => ({ ...prev, [id]: { status: "ok" } }));
+    } catch (err) {
+      const apiErr = err as any;
+      let message = apiErr?.message ?? "onbekende fout";
+      if (apiErr?.body && typeof apiErr.body === "object") {
+        const body = apiErr.body as any;
+        message = body.error || message;
+      }
+      setSavedStatuses(prev => ({ ...prev, [id]: { status: "failed", message } }));
     } finally {
-      setComplianceLoading(false);
+      setProbingIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     }
   }, []);
 
-  const loadWarRoom = useCallback(async (withSpinner = false) => {
-    if (withSpinner) {
-      setWarRoomLoading(true);
-    }
-    try {
-      const data = await apiFetch<IncidentWarRoomData>("/compliance/war-room");
-      setWarRoom(data);
-      setWarRoomError(null);
-    } catch (error) {
-      setWarRoomError(error instanceof Error ? error.message : "Kon incidentdata niet laden");
-    } finally {
+  const loadCompliance = useCallback(
+    async (clusterId?: string, withSpinner = true) => {
+      if (!clusterId) {
+        setCompliance(null);
+        setComplianceError("Selecteer een cluster om compliance-data te laden.");
+        setComplianceLoading(false);
+        return;
+      }
       if (withSpinner) {
+        setComplianceLoading(true);
+      }
+      try {
+        const data = await apiFetch<ComplianceSummary>("/compliance/summary", {}, clusterId);
+        setCompliance(data);
+        setComplianceError(null);
+      } catch (error) {
+        setComplianceError(error instanceof Error ? error.message : "Kon compliance data niet laden");
+      } finally {
+        setComplianceLoading(false);
+      }
+    },
+    []
+  );
+
+  const loadWarRoom = useCallback(
+    async (clusterId?: string, withSpinner = false) => {
+      if (!clusterId) {
+        setWarRoomLoading(false);
+        setWarRoom(null);
+        setWarRoomError("Selecteer een cluster om incidentdata te laden.");
+        return;
+      }
+      if (withSpinner) {
+        setWarRoomLoading(true);
+      }
+      try {
+        const data = await apiFetch<IncidentWarRoomData>("/compliance/war-room", {}, clusterId);
+        setWarRoom(data);
+        setWarRoomError(null);
+      } catch (error) {
+        setWarRoomError(error instanceof Error ? error.message : "Kon incidentdata niet laden");
+      } finally {
         setWarRoomLoading(false);
       }
-    }
-  }, []);
+    },
+    []
+  );
 
   useEffect(() => {
-    setComplianceLoading(true);
-    loadCompliance();
+    if (!activeId) {
+      setCompliance(null);
+      setComplianceError("Selecteer een cluster om compliance-data te laden.");
+      setComplianceLoading(false);
+      return;
+    }
+    loadCompliance(activeId, true);
     const interval = setInterval(() => {
-      loadCompliance();
+      loadCompliance(activeId, false);
     }, 60_000);
     return () => clearInterval(interval);
-  }, [loadCompliance]);
+  }, [activeId, loadCompliance]);
 
   useEffect(() => {
-    loadWarRoom(true);
-  }, [loadWarRoom]);
+    if (!activeId) {
+      setWarRoom(null);
+      setWarRoomError("Selecteer een cluster om incidentdata te laden.");
+      setWarRoomLoading(false);
+      return;
+    }
+    loadWarRoom(activeId, true);
+  }, [activeId, loadWarRoom]);
 
   useEffect(() => {
-    if (!warRoomOpen) {
+    if (!warRoomOpen || !activeId) {
       return;
     }
     const interval = setInterval(() => {
-      loadWarRoom();
+      loadWarRoom(activeId, false);
     }, 15_000);
     return () => clearInterval(interval);
-  }, [warRoomOpen, loadWarRoom]);
+  }, [warRoomOpen, activeId, loadWarRoom]);
 
   const handleOpenWarRoom = useCallback(() => {
+    if (!activeId) {
+      setWarRoomError("Selecteer eerst een cluster.");
+      return;
+    }
     setWarRoomOpen(true);
-    loadWarRoom(true);
-  }, [loadWarRoom]);
+    loadWarRoom(activeId, true);
+  }, [activeId, loadWarRoom]);
 
   const handleNoteSubmit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       const trimmed = noteContent.trim();
       if (!trimmed) {
+        return;
+      }
+      if (!activeId) {
+        setWarRoomError("Selecteer eerst een cluster.");
         return;
       }
       try {
@@ -429,7 +534,7 @@ export default function SettingsPage() {
             content: trimmed,
             author: user?.name
           })
-        });
+        }, activeId);
         setWarRoom(data);
         setNoteContent("");
       } catch (error) {
@@ -438,15 +543,21 @@ export default function SettingsPage() {
         setWarRoomLoading(false);
       }
     },
-    [noteContent, user]
+    [noteContent, user, activeId]
   );
 
   const handleExportReport = useCallback(async () => {
+    if (!activeId) {
+      setReportError("Selecteer eerst een cluster.");
+      return;
+    }
     try {
       setReportError(null);
       setReportLoading(true);
       const base = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:5010/api";
-      const response = await fetch(`${base}/compliance/report`, {
+      const url = new URL(`${base}/compliance/report`);
+      url.searchParams.set("clusterId", activeId);
+      const response = await fetch(url.toString(), {
         method: "GET",
         credentials: "include"
       });
@@ -454,23 +565,23 @@ export default function SettingsPage() {
         throw new Error("Kon compliance rapport niet downloaden");
       }
       const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
+      const downloadUrl = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       const fallbackName = new Date().toISOString().split("T")[0] ?? "rapport";
       const disposition = response.headers.get("Content-Disposition");
       const filenameMatch = disposition?.match(/filename="?([^";]+)"?/i);
-      anchor.href = url;
+      anchor.href = downloadUrl;
       anchor.download = filenameMatch?.[1] ?? `nebula-compliance-${fallbackName}.json`;
       document.body.appendChild(anchor);
       anchor.click();
       document.body.removeChild(anchor);
-      URL.revokeObjectURL(url);
+      URL.revokeObjectURL(downloadUrl);
     } catch (error) {
       setReportError(error instanceof Error ? error.message : "Download mislukt");
     } finally {
       setReportLoading(false);
     }
-  }, []);
+  }, [activeId]);
 
   const earliestExpiring = useMemo(() => {
     if (!compliance || compliance.secrets.expiring.length === 0) {
@@ -496,6 +607,7 @@ export default function SettingsPage() {
     if (!isAdmin) {
       return;
     }
+    setTestResult(null);
     const created = await apiFetch<{ id: string; name: string }>("/clusters", {
       method: "POST",
       body: JSON.stringify({
@@ -513,6 +625,39 @@ export default function SettingsPage() {
     setCaCert("");
     setInsecure(false);
   }
+
+  const handleProbe = useCallback(async () => {
+    if (!isAdmin) return;
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const result = await apiFetch<{ ok: boolean; kubernetesVersion?: string } | { ok: boolean }>("/clusters/probe", {
+        method: "POST",
+        body: JSON.stringify({
+          name: name || "adhoc",
+          apiUrl,
+          caCert: caCert || undefined,
+          insecureTLS: insecure,
+          auth: { bearerToken: token || undefined }
+        })
+      });
+      // if OK, apiFetch returns data directly
+      const ok = (result as any).ok !== false;
+      const version = (result as any).kubernetesVersion as string | undefined;
+      setTestResult(ok ? `Verbinding ok${version ? ` (version: ${version})` : ""}` : "Verbinding mislukt");
+    } catch (err) {
+      const apiErr = err as any;
+      if (apiErr?.body && typeof apiErr.body === "object") {
+        const body = apiErr.body as any;
+        const detail = body.details ? `\nDetails: ${JSON.stringify(body.details)}` : "";
+        setTestResult(`Verbinding mislukt: ${body.error || apiErr.message}${detail}`);
+      } else {
+        setTestResult(`Verbinding mislukt: ${apiErr?.message ?? "onbekende fout"}`);
+      }
+    } finally {
+      setTesting(false);
+    }
+  }, [isAdmin, name, apiUrl, caCert, insecure, token]);
 
   const warRoomPreviewNote = warRoom?.notes[0];
   return (
@@ -631,7 +776,7 @@ export default function SettingsPage() {
               Start emergency overlay
             </button>
             <button
-              onClick={() => loadWarRoom(true)}
+              onClick={() => loadWarRoom(activeId, true)}
               className="rounded-full border border-white/10 bg-white/10 px-5 py-2 text-xs uppercase tracking-[0.35em] text-white/70 transition hover:text-white"
             >
               Refresh
@@ -661,7 +806,7 @@ export default function SettingsPage() {
               <button
                 onClick={() => {
                   setComplianceLoading(true);
-                  loadCompliance();
+                  loadCompliance(activeId, true);
                 }}
                 className="rounded-full border border-white/10 bg-white/10 px-5 py-2 text-xs uppercase tracking-[0.35em] text-white/70 transition hover:text-white"
               >
@@ -879,6 +1024,12 @@ export default function SettingsPage() {
             <button type="submit" className="mt-2 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-black">
               Opslaan
             </button>
+            <button type="button" onClick={handleProbe} disabled={testing} className="mt-2 rounded-md border border-white/10 bg-white/10 px-4 py-2 text-sm text-white/80 hover:bg-white/20 disabled:opacity-60">
+              {testing ? "Verbinding testen..." : "Verbinding testen"}
+            </button>
+            {testResult && (
+              <p className={`mt-2 text-sm ${testResult.startsWith("Verbinding ok") ? "text-success" : "text-danger"}`}>{testResult}</p>
+            )}
           </div>
         </form>
         ) : (
@@ -891,23 +1042,70 @@ export default function SettingsPage() {
         <div className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-glow">
           <h2 className="mb-4 text-lg font-semibold text-white">Jouw clusters</h2>
           <ul className="space-y-2">
-            {list.map(c => (
-              <li key={c.id} className="flex items-center justify-between rounded-md bg-black/30 p-3 text-sm text-white/80">
-                <span>{c.name}</span>
-                <button
-                  onClick={async () => {
-                    await apiFetch(`/clusters/${c.id}`, { method: "DELETE" });
-                    setList(prev => prev.filter(x => x.id !== c.id));
-                    if (typeof window !== "undefined" && localStorage.getItem("clusterId") === c.id) {
-                      localStorage.removeItem("clusterId");
-                    }
-                  }}
-                  className="rounded-md border border-white/10 px-3 py-1 text-xs text-white/70 hover:bg-white/10"
-                >
-                  Verwijderen
-                </button>
-              </li>
-            ))}
+            {list.map(c => {
+              const status = savedStatuses[c.id]?.status;
+              const message = savedStatuses[c.id]?.message;
+              const probing = probingIds.has(c.id);
+              const isActive = activeId === c.id;
+              return (
+                <li key={c.id} className="flex items-center justify-between rounded-md bg-black/30 p-3 text-sm text-white/80">
+                  <div className="flex items-center gap-3">
+                    <span>{c.name}</span>
+                    {isActive && <span className="rounded-full border border-white/10 bg-accent/20 px-2 py-0.5 text-xs text-accent">Actief</span>}
+                    {status === "ok" && <span className="rounded-full border border-white/10 bg-success/20 px-2 py-0.5 text-xs text-success">Verbonden</span>}
+                    {status === "failed" && (
+                      <span className="rounded-full border border-danger/40 bg-danger/10 px-2 py-0.5 text-xs text-danger" title={message}>Niet verbonden</span>
+                    )}
+                    {status === undefined && <span className="rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-xs text-white/60">Onbekend</span>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        if (typeof window !== "undefined") {
+                          window.localStorage.setItem("clusterId", c.id);
+                          document.cookie = `clusterId=${c.id}; path=/`;
+                        }
+                        setActiveId(c.id);
+                      }}
+                      className="rounded-md border border-white/10 px-3 py-1 text-xs text-white/70 hover:bg-white/10"
+                    >
+                      Maak actief
+                    </button>
+                    <button
+                      onClick={() => probeSaved(c.id)}
+                      disabled={probing}
+                      className="rounded-md border border-white/10 px-3 py-1 text-xs text-white/70 hover:bg-white/10 disabled:opacity-60"
+                    >
+                      {probing ? "Testen..." : "Test verbinding"}
+                    </button>
+                    <button
+                      onClick={async () => {
+                        await apiFetch(`/clusters/${c.id}`, { method: "DELETE" });
+                        setList(prev => prev.filter(x => x.id !== c.id));
+                        setSavedStatuses(prev => {
+                          const copy = { ...prev };
+                          delete copy[c.id];
+                          return copy;
+                        });
+                        if (activeId === c.id) {
+                          if (typeof window !== "undefined") {
+                            window.localStorage.removeItem("clusterId");
+                            document.cookie = `clusterId=; Max-Age=0; path=/`;
+                          }
+                          setActiveId(undefined);
+                        }
+                        if (typeof window !== "undefined" && localStorage.getItem("clusterId") === c.id) {
+                          localStorage.removeItem("clusterId");
+                        }
+                      }}
+                      className="rounded-md border border-white/10 px-3 py-1 text-xs text-white/70 hover:bg-white/10"
+                    >
+                      Verwijderen
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
             {list.length === 0 && <li className="text-xs text-white/40">Nog geen clusters toegevoegd</li>}
           </ul>
         </div>
@@ -920,13 +1118,25 @@ export default function SettingsPage() {
         error={warRoomError}
         noteContent={noteContent}
         onClose={() => setWarRoomOpen(false)}
-        onRefresh={() => loadWarRoom(true)}
+        onRefresh={() => loadWarRoom(activeId, true)}
         onNoteChange={setNoteContent}
         onSubmitNote={handleNoteSubmit}
       />
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -1,25 +1,80 @@
 "use client";
 
-import { useLiveFeed } from "@/hooks/use-live-feed";
 import { apiFetch } from "@/lib/api-client";
-import { useMemo, useState } from "react";
-import { Search, Filter, Wand2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Search, Filter, Wand2, RefreshCw } from "lucide-react";
+import type { LiveLogEntry } from "@kube-suite/shared";
 
 export default function LogsPage() {
-  const feed = useLiveFeed();
   const [query, setQuery] = useState("");
   const [level, setLevel] = useState<string>("all");
   const [analysis, setAnalysis] = useState<string>("");
+  const [namespaces, setNamespaces] = useState<string[]>([]);
+  const [namespace, setNamespace] = useState<string>("default");
+  const [pods, setPods] = useState<Array<{ name: string; containers: string[] }>>([]);
+  const [pod, setPod] = useState<string>("");
+  const [container, setContainer] = useState<string>("");
+  const [logs, setLogs] = useState<LiveLogEntry[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  const allLogs = useMemo(() => feed.logs, [feed.logs]);
+  useEffect(() => {
+    apiFetch<string[]>("/cluster/namespaces")
+      .then(list => {
+        setNamespaces(list);
+        if (list.length > 0 && !list.includes(namespace)) {
+          setNamespace(list[0]);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!namespace) return;
+    apiFetch<Array<{ name: string; containers: string[] }>>(`/cluster/namespaces/${namespace}/pods`)
+      .then(list => {
+        setPods(list);
+        if (list.length > 0) {
+          setPod(prev => (prev && list.some(p => p.name === prev) ? prev : list[0].name));
+          const selected = list.find(p => p.name === (pod || list[0].name));
+          if (selected) {
+            setContainer(prev => (prev && selected.containers.includes(prev) ? prev : (selected.containers[0] ?? "")));
+          }
+        } else {
+          setPod("");
+          setContainer("");
+        }
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [namespace]);
+
+  async function loadLogs() {
+    if (!namespace || !pod) {
+      setLogs([]);
+      return;
+    }
+    setLoading(true);
+    try {
+      const qs = container ? `?container=${encodeURIComponent(container)}` : "";
+      const data = await apiFetch<LiveLogEntry[]>(`/cluster/namespaces/${encodeURIComponent(namespace)}/pods/${encodeURIComponent(pod)}/logs${qs}`);
+      setLogs(data);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadLogs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pod, container]);
 
   const filtered = useMemo(() => {
-    return allLogs.filter(
+    return logs.filter(
       log =>
         (level === "all" || log.level === level) &&
         `${log.pod} ${log.container} ${log.message}`.toLowerCase().includes(query.toLowerCase())
     );
-  }, [allLogs, query, level]);
+  }, [logs, query, level]);
 
   async function analyze() {
     const lines = filtered
@@ -46,6 +101,33 @@ export default function LogsPage() {
           <h1 className="text-3xl font-semibold text-white">Live cluster logs</h1>
         </div>
         <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-2">
+            <span className="text-xs text-white/50">Namespace</span>
+            <select value={namespace} onChange={e => setNamespace(e.target.value)} className="bg-transparent text-sm text-white/80 focus:outline-none">
+              {namespaces.map(ns => (
+                <option key={ns} value={ns}>{ns}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-2">
+            <span className="text-xs text-white/50">Pod</span>
+            <select value={pod} onChange={e => setPod(e.target.value)} className="bg-transparent text-sm text-white/80 focus:outline-none">
+              {pods.map(p => (
+                <option key={p.name} value={p.name}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-2">
+            <span className="text-xs text-white/50">Container</span>
+            <select value={container} onChange={e => setContainer(e.target.value)} className="bg-transparent text-sm text-white/80 focus:outline-none">
+              {(pods.find(x => x.name === pod)?.containers ?? []).map(c => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </div>
+          <button onClick={loadLogs} disabled={loading} className="flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80 hover:bg-white/10 disabled:opacity-60">
+            <RefreshCw className="h-4 w-4" /> Refresh
+          </button>
           <div className="flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-2">
             <Search className="h-4 w-4 text-white/50" />
             <input

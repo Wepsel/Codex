@@ -3,6 +3,8 @@ import type { DeploymentWizardPayload } from "@kube-suite/shared";
 import type { RequestWithUser } from "../types";
 import kubernetesService from "../services/kubernetes.service";
 import { interpretCopilotPrompt } from "../services/copilot.service";
+import { getCompanyCluster } from "../services/cluster-registry";
+import { persistClusterLogs } from "../services/event-store";
 
 export async function fetchClusterSummary(req: RequestWithUser, res: Response) {
   const summary = await kubernetesService.getClusterSummary();
@@ -43,6 +45,23 @@ export async function fetchPodLogs(req: RequestWithUser, res: Response) {
   const pod = req.params.pod;
   const { container } = req.query as { container?: string };
   const logs = await kubernetesService.getPodLogs(namespace, pod, container);
+  // best-effort persist logs
+  try {
+    const conn = await getCompanyCluster(req.user!.company.id, req.cookies["clusterId"] ?? "");
+    if (conn) {
+      await persistClusterLogs(
+        conn.id,
+        logs.map(l => ({
+          namespace: l.namespace,
+          pod: l.pod,
+          container: l.container,
+          level: l.level,
+          message: l.message,
+          timestamp: l.timestamp
+        }))
+      );
+    }
+  } catch {}
   res.json({ ok: true, data: logs });
 }
 

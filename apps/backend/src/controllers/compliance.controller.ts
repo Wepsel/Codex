@@ -4,20 +4,52 @@ import {
   addIncidentNote,
   generateComplianceReport,
   getComplianceSummary,
-  getIncidentWarRoomData
+  getIncidentWarRoomData,
+  getZeroTrustSnapshot
 } from "../services/compliance.service";
+import { getCompanyCluster, listCompanyClusters } from "../services/cluster-registry";
+import type { ClusterConnection } from "../services/cluster-registry";
 
-export function fetchComplianceSummary(_req: RequestWithUser, res: Response) {
-  const summary = getComplianceSummary();
+async function resolveClusterFromRequest(req: RequestWithUser): Promise<{ cluster: ClusterConnection | null; requestedId?: string }> {
+  const companyId = req.user!.company.id;
+  const requestedId = (req.query.clusterId ?? req.body?.clusterId ?? req.headers["x-cluster-id"]) as string | undefined;
+
+  if (requestedId) {
+    const cluster = await getCompanyCluster(companyId, requestedId);
+    return { cluster, requestedId };
+  }
+
+  const clusters = await listCompanyClusters(companyId);
+  return { cluster: clusters[0] ?? null };
+}
+
+export async function fetchComplianceSummary(req: RequestWithUser, res: Response) {
+  const { cluster, requestedId } = await resolveClusterFromRequest(req);
+  if (!cluster && requestedId) {
+    res.status(404).json({ ok: false, error: "Cluster niet gevonden" });
+    return;
+  }
+  const summary = await getComplianceSummary(cluster);
   res.json({ ok: true, data: summary });
 }
 
-export function fetchWarRoomData(_req: RequestWithUser, res: Response) {
-  const warRoom = getIncidentWarRoomData();
+export async function fetchWarRoomData(req: RequestWithUser, res: Response) {
+  const { cluster, requestedId } = await resolveClusterFromRequest(req);
+  if (!cluster && requestedId) {
+    res.status(404).json({ ok: false, error: "Cluster niet gevonden" });
+    return;
+  }
+  const warRoom = await getIncidentWarRoomData(cluster);
   res.json({ ok: true, data: warRoom });
 }
 
-export function createWarRoomNote(req: RequestWithUser, res: Response) {
+export async function createWarRoomNote(req: RequestWithUser, res: Response) {
+  const { cluster, requestedId } = await resolveClusterFromRequest(req);
+  if (!cluster && requestedId) {
+    res.status(404).json({ ok: false, error: "Cluster niet gevonden" });
+    return;
+  }
+
   const content = typeof req.body?.content === "string" ? req.body.content : "";
   const author =
     typeof req.body?.author === "string" && req.body.author.trim().length > 0
@@ -25,7 +57,7 @@ export function createWarRoomNote(req: RequestWithUser, res: Response) {
       : req.user?.name;
 
   try {
-    const warRoom = addIncidentNote({ content, author });
+    const warRoom = await addIncidentNote(cluster, { content, author });
     res.status(201).json({ ok: true, data: warRoom });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Onbekende fout";
@@ -33,8 +65,14 @@ export function createWarRoomNote(req: RequestWithUser, res: Response) {
   }
 }
 
-export function exportComplianceReport(_req: RequestWithUser, res: Response) {
-  const report = generateComplianceReport();
+export async function exportComplianceReport(req: RequestWithUser, res: Response) {
+  const { cluster, requestedId } = await resolveClusterFromRequest(req);
+  if (!cluster && requestedId) {
+    res.status(404).json({ ok: false, error: "Cluster niet gevonden" });
+    return;
+  }
+
+  const report = await generateComplianceReport(cluster);
   const payload = JSON.stringify(report, null, 2);
   const safeTimestamp = report.generatedAt.replace(/[:.]/g, "-");
 
@@ -44,4 +82,14 @@ export function exportComplianceReport(_req: RequestWithUser, res: Response) {
     `attachment; filename="compliance-report-${safeTimestamp}.json"`
   );
   res.status(200).send(payload);
+}
+
+export async function fetchZeroTrustSnapshot(req: RequestWithUser, res: Response) {
+  const { cluster, requestedId } = await resolveClusterFromRequest(req);
+  if (!cluster && requestedId) {
+    res.status(404).json({ ok: false, error: "Cluster niet gevonden" });
+    return;
+  }
+  const snapshot = await getZeroTrustSnapshot(cluster);
+  res.json({ ok: true, data: snapshot });
 }

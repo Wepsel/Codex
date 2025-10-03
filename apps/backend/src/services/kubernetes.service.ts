@@ -210,7 +210,6 @@ export class KubernetesService {
 
   async planDeployment(payload: DeploymentWizardPayload): Promise<DeploymentPlanResponse> {
     const id = randomUUID();
-    const baseImage = payload.image.includes(":") ? payload.image.split(":")[0] : payload.image;
     const targetTag = payload.strategy === "RollingUpdate" ? "stable" : "canary";
 
     const steps: DeploymentPlanResponse["steps"] = [
@@ -240,15 +239,45 @@ export class KubernetesService {
       }
     ];
 
-    const diff = `@@ manifest/${payload.name}.yaml\n- image: ${payload.image}\n+ image: ${baseImage}:${targetTag}`;
-    const warnings = payload.replicas > 5 ? ["Scaling beyond 5 replicas may require PDB update"] : [];
+    // Extract ALL container images from the provided manifestYaml to support multi-container workloads
+    const images: string[] = [];
+    const manifest = payload.manifestYaml ?? "";
+    const imageLineRegex = /(^|\n)\s*image:\s*([^\s#]+)\s*(?:#.*)?/g; // capture non-space image values
+    let match: RegExpExecArray | null;
+    while ((match = imageLineRegex.exec(manifest)) !== null) {
+      const image = match[2].trim();
+      if (image.length > 0) {
+        images.push(image);
+      }
+    }
+
+    const uniqueImages = Array.from(new Set(images));
+    const diffLines: string[] = [
+      `@@ manifest/${payload.name}.yaml`
+    ];
+    for (const image of uniqueImages) {
+      const base = image.includes(":") ? image.split(":")[0] : image;
+      diffLines.push(`- image: ${image}`);
+      diffLines.push(`+ image: ${base}:${targetTag}`);
+    }
+    // Fallback: if no images were detected, include at least the single provided image field
+    if (uniqueImages.length === 0 && payload.image) {
+      const baseSingle = payload.image.includes(":") ? payload.image.split(":")[0] : payload.image;
+      diffLines.push(`- image: ${payload.image}`);
+      diffLines.push(`+ image: ${baseSingle}:${targetTag}`);
+    }
+
+    const warnings: string[] = [];
+    if (payload.replicas > 5) warnings.push("Scaling beyond 5 replicas may require PDB update");
+    if (uniqueImages.length > 1) warnings.push("Multiple container images detected; verify all tags before rollout");
+    if (uniqueImages.length === 0) warnings.push("No explicit image lines found; ensure manifest contains container images");
 
     return {
       id,
       manifestName: payload.name,
       namespace: payload.namespace,
       steps,
-      diff,
+      diff: diffLines.join("\n"),
       warnings
     };
   }

@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { Bell, Search, UserCircle2 } from "lucide-react";
 import type { UserProfile } from "@kube-suite/shared";
 import { useSession } from "@/components/session-context";
+import { apiFetch } from "@/lib/api-client";
 
 interface TopBarProps {
   user: UserProfile;
@@ -17,6 +18,9 @@ export function TopBar({ user }: TopBarProps) {
   const [time, setTime] = useState(new Date());
   const [showBell, setShowBell] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [clusters, setClusters] = useState<{ id: string; name: string }[]>([]);
+  const [clusterOpen, setClusterOpen] = useState(false);
+  const [activeId, setActiveId] = useState<string | undefined>(typeof window !== "undefined" ? localStorage.getItem("clusterId") ?? undefined : undefined);
   const [notifications] = useState([
     { id: "n1", text: "Deployment updated", ts: new Date().toLocaleTimeString() },
     { id: "n2", text: "Node Ready", ts: new Date().toLocaleTimeString() }
@@ -26,6 +30,35 @@ export function TopBar({ user }: TopBarProps) {
     const interval = setInterval(() => setTime(new Date()), 60_000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    apiFetch<{ id: string; name: string }[]>("/clusters")
+      .then(list => {
+        setClusters(list);
+        // cache names in localStorage so sidebar can show active name fast
+        if (typeof window !== "undefined") {
+          list.forEach(c => {
+            try { localStorage.setItem(`cluster:${c.id}:name`, c.name); } catch {}
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  function setActiveCluster(id: string | undefined) {
+    if (typeof window !== "undefined") {
+      if (id) {
+        localStorage.setItem("clusterId", id);
+        document.cookie = `clusterId=${id}; path=/`;
+      } else {
+        localStorage.removeItem("clusterId");
+        document.cookie = `clusterId=; Max-Age=0; path=/`;
+      }
+    }
+    setActiveId(id);
+    setClusterOpen(false);
+    router.refresh();
+  }
 
   async function handleLogout() {
     await logout();
@@ -46,6 +79,41 @@ export function TopBar({ user }: TopBarProps) {
       </div>
 
       <div className="ml-auto flex items-center gap-6 relative">
+        <div className="relative">
+          <button
+            onClick={() => setClusterOpen(v => !v)}
+            className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/80 hover:text-white"
+          >
+            <span className="text-white/70">{clusters.find(c => c.id === activeId)?.name ?? "Selecteer cluster"}</span>
+          </button>
+          {clusterOpen && (
+            <div className="absolute right-0 mt-2 w-64 rounded-xl border border-white/10 bg-black/80 p-2 shadow-xl">
+              <div className="px-3 py-2 text-xs uppercase tracking-[0.35em] text-white/40">Clusters</div>
+              <div className="max-h-72 overflow-auto">
+                {clusters.length === 0 && (
+                  <div className="px-3 py-2 text-xs text-white/50">Geen clusters</div>
+                )}
+                {clusters.map(c => (
+                  <button
+                    key={c.id}
+                    onClick={() => setActiveCluster(c.id)}
+                    className={`block w-full rounded-md px-3 py-2 text-left text-sm ${activeId === c.id ? "bg-white/10 text-white" : "text-white/80 hover:bg-white/10"}`}
+                  >
+                    {c.name}
+                  </button>
+                ))}
+                {activeId && (
+                  <button
+                    onClick={() => setActiveCluster(undefined)}
+                    className="mt-2 block w-full rounded-md px-3 py-2 text-left text-xs uppercase tracking-[0.35em] text-white/60 hover:bg-white/10"
+                  >
+                    De-selecteer
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
         <div className="text-right">
           <p className="text-xs uppercase tracking-[0.45em] text-white/40">UTC</p>
           <p className="font-semibold text-white">

@@ -1,10 +1,11 @@
-import { Router } from "express";
+﻿import { Router } from "express";
 import { ensureActiveCompanyMember, requireCompanyAdmin } from "../middleware/auth";
 import {
   createWarRoomNote,
   exportComplianceReport,
   fetchComplianceSummary,
-  fetchWarRoomData
+  fetchWarRoomData,
+  fetchZeroTrustSnapshot
 } from "../controllers/compliance.controller";
 
 const router = Router();
@@ -15,5 +16,6 @@ router.get("/summary", fetchComplianceSummary);
 router.get("/war-room", fetchWarRoomData);
 router.post("/war-room/notes", requireCompanyAdmin, createWarRoomNote);
 router.get("/report", exportComplianceReport);
+router.get("/zero-trust", fetchZeroTrustSnapshot);
 
 export default router;

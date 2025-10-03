@@ -1,6 +1,7 @@
 ﻿"use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { apiFetch } from "@/lib/api-client";
 import type { AlertItem, ClusterSummary, WorkloadSummary } from "@kube-suite/shared";
 import { MetricCard } from "@/components/dashboard/metric-card";
 import { ClusterHealth } from "@/components/dashboard/cluster-health";
@@ -20,6 +21,33 @@ interface DashboardExperienceProps {
 export function DashboardExperience({ summary, workloads, alerts }: DashboardExperienceProps) {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [copilotOpen, setCopilotOpen] = useState(false);
+  const [liveSummary, setLiveSummary] = useState(summary);
+  const [liveWorkloads, setLiveWorkloads] = useState(workloads);
+  const [liveAlerts, setLiveAlerts] = useState(alerts);
+
+  useEffect(() => {
+    setLiveSummary(summary);
+    setLiveWorkloads(workloads);
+    setLiveAlerts(alerts);
+  }, [summary, workloads, alerts]);
+
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const [s, w, a] = await Promise.all([
+          apiFetch<ClusterSummary>("/cluster/summary"),
+          apiFetch<WorkloadSummary[]>("/cluster/workloads"),
+          apiFetch<AlertItem[]>("/cluster/alerts")
+        ]);
+        setLiveSummary(s);
+        setLiveWorkloads(w);
+        setLiveAlerts(a);
+      } catch {
+        // ignore transient errors
+      }
+    }, 15000);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <div className="relative space-y-8 px-8 pb-16">
@@ -59,17 +87,17 @@ export function DashboardExperience({ summary, workloads, alerts }: DashboardExp
       </header>
 
       <section className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Pods" value={summary.pods.toString()} delta="+12% vs vorige week" trend="up" />
-        <MetricCard label="Workloads" value={summary.workloads.toString()} delta="Stable" trend="neutral" />
-        <MetricCard label="Nodes" value={summary.nodes.toString()} delta="0 changes" trend="neutral" />
-        <MetricCard label="Alerts" value={alerts.length.toString()} delta="-2 resolved" trend="down" />
+        <MetricCard label="Pods" value={liveSummary.pods.toString()} delta="+12% vs vorige week" trend="up" />
+        <MetricCard label="Workloads" value={liveSummary.workloads.toString()} delta="Stable" trend="neutral" />
+        <MetricCard label="Nodes" value={liveSummary.nodes.toString()} delta="0 changes" trend="neutral" />
+        <MetricCard label="Alerts" value={liveAlerts.length.toString()} delta="-2 resolved" trend="down" />
       </section>
 
-      <ClusterHealth summary={summary} />
+      <ClusterHealth summary={liveSummary} />
 
       <section className="grid gap-8 xl:grid-cols-3">
         <div className="xl:col-span-2">
-          <WorkloadTable workloads={workloads} />
+          <WorkloadTable workloads={liveWorkloads} />
         </div>
         <AlertsPanel alerts={alerts} />
       </section>

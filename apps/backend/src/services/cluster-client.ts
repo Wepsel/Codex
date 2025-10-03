@@ -1,4 +1,5 @@
-import { AppsV1Api, CoreV1Api, KubeConfig, Log, Watch } from "@kubernetes/client-node";
+import { PassThrough } from "stream";
+import { AppsV1Api, CoreV1Api, KubeConfig, Log, VersionApi, Watch, type VersionInfo } from "@kubernetes/client-node";
 import type { ClusterConnection } from "./cluster-registry";
 import type {
   AlertItem,
@@ -75,6 +76,7 @@ async function applyDeploymentPatch(api: AppsV1Api, name: string, namespace: str
     undefined,
     undefined,
     undefined,
+    undefined,
     mergePatchOptions
   );
 }
@@ -138,8 +140,20 @@ export async function getWorkloadsFor(conn: ClusterConnection): Promise<Workload
   }
 }
 
-export async function getEventsFor(_conn: ClusterConnection): Promise<ClusterEvent[]> {
-  return mockEvents;
+export async function getEventsFor(conn: ClusterConnection): Promise<ClusterEvent[]> {
+  const apis = createApis(conn);
+  if (!apis) return mockEvents;
+
+  try {
+    const response = await apis.core.listEventForAllNamespaces();
+    const events = response.body.items
+      .map(toClusterEvent)
+      .filter((event): event is ClusterEvent => Boolean(event));
+    return events;
+  } catch (error) {
+    logger.warn("events failed, falling back to mock", { error, clusterConnectionId: conn.id });
+    return mockEvents;
+  }
 }
 
 export async function getAuditFor(_conn: ClusterConnection): Promise<AuditLogEntry[]> {
@@ -160,14 +174,239 @@ export async function getLogsFor(
   if (!apis) return mockLogs;
 
   try {
-    await new Promise(resolve => resolve(container));
-    return mockLogs;
+    const logStream = new PassThrough();
+    const chunks: string[] = [];
+
+    logStream.on("data", chunk => {
+      chunks.push(typeof chunk === "string" ? chunk : chunk.toString("utf8"));
+    });
+
+    await apis.log.log(namespace, pod, container ?? "", logStream, { follow: false, tailLines: 200 });
+
+    const payload = chunks.join("");
+    const lines = payload.split(/\r?\n/).filter(Boolean);
+    const now = Date.now();
+
+    const entries = lines.map((line, index) => ({
+      pod,
+      namespace,
+      container: container ?? "",
+      timestamp: extractTimestampFromLogLine(line) ?? new Date(now - (lines.length - index - 1) * 1000).toISOString(),
+      message: line,
+      level: detectLogLevel(line)
+    }));
+
+    return entries;
   } catch (error) {
-    logger.warn("logs failed, falling back to mock", { error });
+    logger.warn("logs failed, falling back to mock", { error, namespace, pod, container });
     return mockLogs;
   }
 }
 
+function toClusterEvent(event: import("@kubernetes/client-node").V1Event): ClusterEvent | null {
+  if (!event || !event.metadata) {
+    return null;
+  }
+
+  const id = event.metadata.uid ?? `${event.metadata.namespace ?? "default"}:${event.metadata.name ?? "event"}`;
+  const involved = event.involvedObject ?? {};
+
+  return {
+    id,
+    reason: event.reason ?? involved.kind ?? "Unknown",
+    type: normalizeEventType(event.type),
+    message: event.message ?? "",
+    involvedObject: {
+      kind: involved.kind ?? "Object",
+      name: involved.name ?? id,
+      namespace: involved.namespace ?? event.metadata.namespace ?? "default"
+    },
+    timestamp: resolveEventTimestamp(event)
+  };
+}
+
+function normalizeEventType(value?: string): ClusterEvent["type"] {
+  if (!value) return "Normal";
+  const normalized = value.toLowerCase();
+  if (normalized === "warning") return "Warning";
+  if (normalized === "error" || normalized === "severe") return "Error";
+  return "Normal";
+}
+
+function resolveEventTimestamp(event: import("@kubernetes/client-node").V1Event): string {
+  const candidates: Array<string | Date | undefined> = [
+    (event as unknown as { eventTime?: string }).eventTime,
+    event.lastTimestamp,
+    event.firstTimestamp,
+    event.metadata?.creationTimestamp
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const asString = typeof candidate === "string" ? candidate : candidate instanceof Date ? candidate.toISOString() : candidate.toString();
+    const parsed = Date.parse(asString);
+    if (!Number.isNaN(parsed)) {
+      return new Date(parsed).toISOString();
+    }
+  }
+
+  return new Date().toISOString();
+}
+
+function detectLogLevel(line: string): LiveLogEntry["level"] {
+  const value = line.toLowerCase();
+  if (/(\berr(?:or)?|\bfatal|\bsevere)/.test(value)) {
+    return "error";
+  }
+  if (/\bwarn(?:ing)?/.test(value)) {
+    return "warn";
+  }
+  if (/\bdebug/.test(value)) {
+    return "debug";
+  }
+  return "info";
+}
+
+function extractTimestampFromLogLine(line: string): string | undefined {
+  const isoMatch = line.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/);
+  if (isoMatch) {
+    const parsed = Date.parse(isoMatch[0]);
+    if (!Number.isNaN(parsed)) {
+      return new Date(parsed).toISOString();
+    }
+  }
+  return undefined;
+}
+
+
+type ClusterProbeSuccess = { ok: true; clusterName?: string; kubernetesVersion?: string };
+type ClusterProbeFailure = { ok: false; error: string; details?: Record<string, unknown> };
+export type ClusterProbeResult = ClusterProbeSuccess | ClusterProbeFailure;
+
+export async function testClusterConnection(conn: ClusterConnection): Promise<ClusterProbeResult> {
+  let kubeConfig: KubeConfig;
+  try {
+    kubeConfig = buildKubeConfigFromConnection(conn);
+  } catch (error) {
+    logger.error("failed to build kube config for probe", { error, clusterId: conn.id, name: conn.name });
+    return { ok: false, error: "Kon Kubernetes-configuratie niet opbouwen." };
+  }
+
+  try {
+    const versionApi = kubeConfig.makeApiClient(VersionApi);
+    const coreApi = kubeConfig.makeApiClient(CoreV1Api);
+
+    let versionInfo: VersionInfo | undefined;
+    try {
+      const response = await versionApi.getCode();
+      versionInfo = response.body;
+    } catch (error_) {
+      throw { stage: "version", cause: error_ };
+    }
+
+    try {
+      await coreApi.listNamespace(undefined, undefined, undefined, undefined, 1);
+    } catch (error_) {
+      throw { stage: "namespaces", cause: error_ };
+    }
+
+    return {
+      ok: true,
+      clusterName: kubeConfig.getCurrentCluster()?.name ?? conn.name,
+      kubernetesVersion: versionInfo?.gitVersion
+    };
+  } catch (error) {
+    const normalized = normalizeProbeError(error);
+    logger.warn("cluster probe failed", {
+      clusterId: conn.id,
+      name: conn.name,
+      stage: normalized.stage,
+      error: normalized.logPayload
+    });
+    return { ok: false, error: normalized.message, details: normalized.details };
+  }
+}
+
+interface NormalizedProbeFailure {
+  message: string;
+  details?: Record<string, unknown>;
+  stage?: string;
+  logPayload: Record<string, unknown>;
+}
+
+function normalizeProbeError(error: unknown): NormalizedProbeFailure {
+  let stage: string | undefined;
+  let original: unknown = error;
+
+  if (typeof error === "object" && error !== null) {
+    const candidate = error as { cause?: unknown; stage?: unknown };
+    if (typeof candidate.stage === "string") {
+      stage = candidate.stage;
+    }
+    if ("cause" in candidate && candidate.cause !== undefined) {
+      original = candidate.cause;
+    }
+  }
+
+  const parsed = parseKubernetesError(original);
+  let details = parsed.details ? { ...parsed.details } : undefined;
+  if (stage) {
+    details = { ...(details ?? {}), stage };
+  }
+
+  return {
+    message: stage ? `${stage} probe failed: ${parsed.message}` : parsed.message,
+    details,
+    stage,
+    logPayload: {
+      stage,
+      message: parsed.message,
+      details: parsed.details
+    }
+  };
+}
+
+function parseKubernetesError(error: unknown): { message: string; details?: Record<string, unknown> } {
+  if (!error) {
+    return { message: "Unknown error" };
+  }
+  if (typeof error === "string") {
+    return { message: error };
+  }
+  if (error instanceof Error) {
+    const anyError = error as Error & {
+      response?: { statusCode?: number; body?: unknown };
+      statusCode?: number;
+      body?: unknown;
+      code?: string | number;
+    };
+    const response = anyError.response;
+    const statusCode = typeof anyError.statusCode === "number" ? anyError.statusCode : response?.statusCode;
+    const body = (anyError.body ?? response?.body) as Record<string, unknown> | undefined;
+    const messageFromBody =
+      body && typeof (body as any).message === "string" ? ((body as any).message as string) : undefined;
+    const message = messageFromBody ?? anyError.message ?? "Unknown error";
+    const details: Record<string, unknown> = {};
+    if (typeof statusCode === "number") {
+      details.statusCode = statusCode;
+    }
+    if (body && typeof body === "object") {
+      details.body = body;
+    }
+    if (anyError.code !== undefined) {
+      details.code = anyError.code;
+    }
+    return { message, details: Object.keys(details).length ? details : undefined };
+  }
+  if (typeof error === "object") {
+    try {
+      return { message: JSON.stringify(error) };
+    } catch {
+      return { message: "Unknown error" };
+    }
+  }
+  return { message: String(error) };
+}
 function toNamespaceSummary(pods: import("@kubernetes/client-node").V1PodList): NamespaceSummary[] {
   const namespaces = new Map<string, NamespaceSummary>();
 

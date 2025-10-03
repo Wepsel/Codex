@@ -8,7 +8,7 @@ import { Sidebar } from "@/components/sidebar";
 import { TopBar } from "@/components/top-bar";
 
 const AUTH_ROUTES = ["/login", "/register"];
-const PROTECTED_PREFIXES = ["/dashboard", "/workloads", "/events", "/settings", "/profile", "/logs"];
+const PROTECTED_PREFIXES = ["/dashboard", "/workloads", "/events", "/capacity", "/optimizer", "/settings", "/profile", "/logs"];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, loading } = useSession();
@@ -61,4 +61,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
+
+
 

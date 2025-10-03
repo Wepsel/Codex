@@ -1,4 +1,4 @@
-export type ClusterPhase = "Healthy" | "Degraded" | "Critical";
+﻿export type ClusterPhase = "Healthy" | "Degraded" | "Critical";
 export interface MetricPoint {
     timestamp: string;
     value: number;
@@ -18,6 +18,38 @@ export interface NamespaceSummary {
     workloads: number;
     pods: number;
     activeAlerts: number;
+}
+export interface CapacityNodeSnapshot {
+    name: string;
+    cpuCapacity: number;
+    cpuAllocatable: number;
+    cpuRequested: number;
+    cpuUtilization: number;
+    memoryCapacity: number;
+    memoryAllocatable: number;
+    memoryRequested: number;
+    memoryUtilization: number;
+    pods: number;
+    conditions: Array<{ type: string; status: string }>;
+}
+export interface CapacityNamespaceSnapshot {
+    name: string;
+    cpuRequested: number;
+    memoryRequested: number;
+    workloads: number;
+}
+export interface CapacitySnapshot {
+    totals: {
+        cpuCapacity: number;
+        cpuAllocatable: number;
+        cpuRequested: number;
+        memoryCapacity: number;
+        memoryAllocatable: number;
+        memoryRequested: number;
+        pods: number;
+    };
+    nodes: CapacityNodeSnapshot[];
+    namespaces: CapacityNamespaceSnapshot[];
 }
 export interface WorkloadSummary {
     name: string;
@@ -107,4 +139,79 @@ export interface ClusterEvent {
     };
     timestamp: string;
 }
-//# sourceMappingURL=index.d.ts.map
+//# sourceMappingURL=index.d.ts.mapexport interface ZeroTrustSnapshot {
+    generatedAt: string;
+    riskScore: number;
+    identity: {
+        privilegedRoles: number;
+        orphanBindings: number;
+        serviceAccountsWithoutTokens: number;
+    };
+    secrets: {
+        expiring: number;
+        unencrypted: number;
+    };
+    network: {
+        policies: number;
+        namespacesCovered: number;
+        totalNamespaces: number;
+        coverage: number;
+    };
+    recommendations: string[];
+}
+
+
+export type EfficiencySeverity = "low" | "medium" | "high";
+export interface EfficiencyInsight {
+    id: string;
+    severity: EfficiencySeverity;
+    title: string;
+    description: string;
+    recommendation?: string;
+}
+export interface NodeEfficiencySnapshot {
+    name: string;
+    cpuUtilization: number;
+    memoryUtilization: number;
+    pods: number;
+}
+export interface NamespaceEfficiencySnapshot {
+    name: string;
+    cpuShare: number;
+    memoryShare: number;
+    workloads: number;
+    pressure: boolean;
+}
+export interface WorkloadAttentionItem {
+    name: string;
+    namespace: string;
+    replicasDesired: number;
+    replicasReady: number;
+    reason: string;
+    severity: EfficiencySeverity;
+}
+export interface ClusterEfficiencyReport {
+    generatedAt: string;
+    cpu: {
+        requested: number;
+        allocatable: number;
+        utilization: number;
+        waste: number;
+    };
+    memory: {
+        requested: number;
+        allocatable: number;
+        utilization: number;
+        waste: number;
+    };
+    costEstimate: {
+        monthly: number;
+        potentialSavings: number;
+    };
+    hotNodes: NodeEfficiencySnapshot[];
+    coldNodes: NodeEfficiencySnapshot[];
+    namespaces: NamespaceEfficiencySnapshot[];
+    workloadsNeedingAttention: WorkloadAttentionItem[];
+    insights: EfficiencyInsight[];
+}
+

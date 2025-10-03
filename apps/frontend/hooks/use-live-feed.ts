@@ -29,10 +29,18 @@ export function useLiveFeed() {
 
   useEffect(() => {
     const socket: Socket = io(process.env.NEXT_PUBLIC_SOCKET_URL ?? "http://localhost:5010", {
-      path: process.env.NEXT_PUBLIC_SOCKET_PATH ?? "/ws"
+      path: process.env.NEXT_PUBLIC_SOCKET_PATH ?? "/ws",
+      transports: ["websocket"],
+      withCredentials: true
     });
 
-    socket.emit("register", { userId: "demo-user", clusters: ["demo-cluster"] });
+    // Register with active cluster id if available
+    try {
+      const clusterId = typeof window !== "undefined" ? window.localStorage.getItem("clusterId") ?? undefined : undefined;
+      socket.emit("register", { userId: "nebula-user", clusters: clusterId ? [clusterId] : [] } as any);
+    } catch {
+      socket.emit("register", { userId: "nebula-user", clusters: [] } as any);
+    }
 
     socket.on("logs", (event: EventEnvelope<LiveLogEntry>) => {
       setFeed(prev => ({

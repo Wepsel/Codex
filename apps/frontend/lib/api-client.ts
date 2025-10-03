@@ -1,13 +1,13 @@
 ﻿const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:5010/api";
 
-function withCluster(path: string, clusterId?: string): string {
+ function withCluster(path: string, clusterId?: string): string {
   if (!clusterId) return path;
   if (path.startsWith("/clusters/")) return path;
   if (path.startsWith("/cluster/")) {
-    return `/clusters/${clusterId}${path.replace("/cluster", "")}`;
+    return `/clusters/${clusterId}${path}`;
   }
   return `/clusters/${clusterId}${path}`;
-}
+ }
 
 interface FetchOptions extends RequestInit {
   parseJson?: boolean;
@@ -30,7 +30,33 @@ export function isCompanyMembershipInactiveError(error: unknown): error is ApiEr
 }
 
 export async function apiFetch<T>(path: string, options: FetchOptions = {}, clusterId?: string): Promise<T> {
-  const scoped = withCluster(path, clusterId);
+  let resolvedClusterId = clusterId;
+  // Server-side: try to read selected cluster from cookies if not provided
+  if (typeof window === "undefined" && !resolvedClusterId && path.startsWith("/cluster/")) {
+    try {
+      const { cookies } = await import("next/headers");
+      const cookieId = cookies().get("clusterId")?.value;
+      if (cookieId) {
+        resolvedClusterId = cookieId;
+      }
+    } catch {
+      // ignore
+    }
+  }
+  // Client-side: fall back to localStorage/cookie if not provided
+  if (typeof window !== "undefined" && !resolvedClusterId && path.startsWith("/cluster/")) {
+    try {
+      const ls = window.localStorage.getItem("clusterId") ?? undefined;
+      if (ls) resolvedClusterId = ls;
+      if (!resolvedClusterId) {
+        const match = document.cookie.match(/(?:^|; )clusterId=([^;]+)/);
+        resolvedClusterId = match ? decodeURIComponent(match[1]) : undefined;
+      }
+    } catch {
+      // ignore
+    }
+  }
+  const scoped = withCluster(path, resolvedClusterId);
   const url = `${API_BASE}${scoped}`;
 
   const headers: Record<string, string> = {
@@ -57,7 +83,13 @@ export async function apiFetch<T>(path: string, options: FetchOptions = {}, clus
     init.credentials = "include";
   }
 
-  const response = await fetch(url, init);
+  let response: Response;
+  try {
+    response = await fetch(url, init);
+  } catch (err) {
+    const hint = `Kon geen verbinding maken met API (${url}). Controleer NEXT_PUBLIC_API_BASE_URL en of de backend draait.`;
+    throw new ApiError(hint, 0, { error: (err as Error)?.message });
+  }
 
   if (!response.ok) {
     const contentType = response.headers.get("content-type") ?? "";

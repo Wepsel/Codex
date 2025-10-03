@@ -1,4 +1,4 @@
-import { Pool, PoolClient, QueryResult, QueryResultRow } from "pg";
+﻿import { Pool, PoolClient, QueryResult, QueryResultRow } from "pg";
 import { newDb, IMemoryDb } from "pg-mem";
 import env from "../config/env";
 import { logger } from "./logger";
@@ -75,7 +75,60 @@ const schemaStatements: string[] = [
     auth_client_key TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`,
-  `CREATE INDEX IF NOT EXISTS cluster_connections_company_id_idx ON cluster_connections(company_id)`
+  `CREATE INDEX IF NOT EXISTS cluster_connections_company_id_idx ON cluster_connections(company_id)`,
+  `CREATE TABLE IF NOT EXISTS cluster_events (
+    id UUID PRIMARY KEY,
+    cluster_connection_id UUID NOT NULL REFERENCES cluster_connections(id) ON DELETE CASCADE,
+    event_type TEXT NOT NULL CHECK (event_type IN ('connection_status_change', 'message_received', 'message_sent')),
+    event_data JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS cluster_events_cluster_connection_id_idx ON cluster_events(cluster_connection_id)`,
+  `CREATE TABLE IF NOT EXISTS incident_notes (
+    id UUID PRIMARY KEY,
+    cluster_connection_id UUID NOT NULL REFERENCES cluster_connections(id) ON DELETE CASCADE,
+    author TEXT,
+    content TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS incident_notes_cluster_idx ON incident_notes(cluster_connection_id, created_at DESC)`,
+  `CREATE TABLE IF NOT EXISTS cluster_log_entries (
+    id UUID PRIMARY KEY,
+    cluster_connection_id UUID NOT NULL REFERENCES cluster_connections(id) ON DELETE CASCADE,
+    namespace TEXT,
+    pod TEXT,
+    container TEXT,
+    level TEXT,
+    message TEXT,
+    log_timestamp TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS cluster_log_entries_lookup_idx ON cluster_log_entries(cluster_connection_id, namespace, pod, container, log_timestamp DESC)`,
+  `CREATE TABLE IF NOT EXISTS node_cost_catalog (
+    provider TEXT NOT NULL,
+    instance_type TEXT NOT NULL,
+    cpu_hourly NUMERIC NOT NULL,
+    memory_hourly NUMERIC NOT NULL,
+    PRIMARY KEY (provider, instance_type)
+  )`,
+  `CREATE TABLE IF NOT EXISTS optimizer_recommendations (
+    id UUID PRIMARY KEY,
+    cluster_connection_id UUID NOT NULL REFERENCES cluster_connections(id) ON DELETE CASCADE,
+    severity TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    recommendation TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS optimizer_auto_actions (
+    id UUID PRIMARY KEY,
+    cluster_connection_id UUID NOT NULL REFERENCES cluster_connections(id) ON DELETE CASCADE,
+    action TEXT NOT NULL,
+    target TEXT NOT NULL,
+    payload JSONB,
+    status TEXT NOT NULL,
+    executed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`
 ];
 
 function createPool(): Pool {
@@ -145,3 +198,5 @@ export async function query<T extends QueryResultRow = QueryResultRow>(text: str
 export function isInMemoryDatabase(): boolean {
   return memoryDb !== null && !env.databaseUrl;
 }
+
+
